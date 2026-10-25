@@ -25,7 +25,6 @@ import {
 } from "@/lib/weixin-cloud-sync";
 import { connectPersonalPushCloud, deployPersonalPushCloud, isPersonalPushCloudActive } from "@/lib/personal-push-cloud";
 import { ensurePersonalPushSubscription, getOfflinePushState, markAccountPushSubscribed } from "@/lib/push-client";
-import { requestHuaweiPushTokenSync } from "@/lib/huawei-push-client";
 import { getWeixinCloudDeployedAt, markWeixinCloudDeployed, savePushCloudScheduled, saveWeixinCloudScheduled } from "@/lib/cloud-deploy-status";
 import { Input, Select } from "@/components/ui/form";
 
@@ -331,7 +330,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                     markAccountPushSubscribed(false);
                 }
                 savePushCloudScheduled(true);
-                requestHuaweiPushTokenSync();
                 done.push("离线推送");
             }
 
@@ -392,7 +390,6 @@ export function CloudServicesSetup({ onConfigChanged }: { onConfigChanged?: () =
                         lines.push("离线推送：已连接 ✓（本设备推送未开启，需要时到推送设置里打开）");
                     }
                     if (push.note) lines.push(`　注意：${push.note}`);
-                    requestHuaweiPushTokenSync();
                 } else {
                     lines.push(`离线推送：未检测到部署${push.error ? `（${push.error}）` : ""}，如需使用请走上方部署流程`);
                 }

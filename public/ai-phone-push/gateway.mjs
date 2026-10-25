@@ -3,7 +3,6 @@
 // verify_jwt 必须关闭；请求改用用户自己的 service_role key 做逐次校验。
 
 type SubscriptionRow = { endpoint: string; p256dh: string; auth: string };
-type HuaweiDeviceRow = { token: string };
 type ShortcutCommandRow = {
   id: string;
   user_id: string;
@@ -233,46 +232,6 @@ async function encryptPayload(plain: string, secret: string): Promise<EncryptedP
     tag: bytesToB64(combined.slice(combined.length - 16)),
     ct: bytesToB64(combined.slice(0, combined.length - 16)),
   };
-}
-
-let huaweiAccessToken = "";
-let huaweiAccessTokenUntil = 0;
-
-async function sendHuaweiNotification(deviceToken: string, title: string, body: string): Promise<void> {
-  const clientSecret = Deno.env.get("HUAWEI_PUSH_CLIENT_SECRET") || "";
-  if (!clientSecret) throw new Error("HUAWEI_PUSH_CLIENT_SECRET is not configured");
-  if (!huaweiAccessToken || Date.now() >= huaweiAccessTokenUntil) {
-    const response = await fetch("https://oauth-login.cloud.huawei.com/oauth2/v3/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant_type: "client_credentials", client_id: "119509559", client_secret: clientSecret }),
-    });
-    const result = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
-    if (!response.ok || !result.access_token) throw new Error(`Huawei OAuth HTTP ${response.status}`);
-    huaweiAccessToken = result.access_token;
-    huaweiAccessTokenUntil = Date.now() + Math.max(60, (Number(result.expires_in) || 3600) - 120) * 1000;
-  }
-  const response = await fetch("https://push-api.cloud.huawei.com/v1/119509559/messages:send", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${huaweiAccessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      validate_only: false,
-      message: {
-        android: {
-          ttl: "3600s",
-          notification: {
-            title: title.slice(0, 100), body: body.slice(0, 1000),
-            click_action: { type: 3 },
-          },
-        },
-        token: [deviceToken],
-      },
-    }),
-  });
-  const result = await response.json().catch(() => ({})) as { code?: string; msg?: string };
-  if (!response.ok || result.code !== "80000000") {
-    throw new Error(`Huawei Push ${result.code || response.status}: ${(result.msg || "send failed").slice(0, 120)}`);
-  }
 }
 
 Deno.serve(async (request: Request) => {
@@ -618,38 +577,7 @@ Deno.serve(async (request: Request) => {
       const rows = await readJson<Array<{ endpoint: string }>>(await rest(
         `push_subscriptions?user_id=eq.${OWNER_ID}&select=endpoint&limit=1`,
       ));
-      const huawei = await readJson<HuaweiDeviceRow[]>(await rest(
-        `push_huawei_devices?user_id=eq.${OWNER_ID}&select=token&limit=1`,
-      ));
-      return json({ ok: true, subscribed: rows.length > 0 || huawei.length > 0, huaweiLinked: huawei.length > 0 });
-    }
-
-    if (action === "huawei-device") {
-      if (request.method === "GET") {
-        const rows = await readJson<HuaweiDeviceRow[]>(await rest(
-          `push_huawei_devices?user_id=eq.${OWNER_ID}&select=token&limit=1`,
-        ));
-        return json({ ok: true, linked: rows.length > 0 });
-      }
-      if (request.method === "POST") {
-        const body = await request.json().catch(() => ({})) as { token?: unknown };
-        const token = cleanText(body.token, 2048);
-        if (token.length < 32 || /[\s\x00-\x1f]/.test(token)) {
-          return json({ ok: false, error: "Invalid Huawei device token" }, 400);
-        }
-        await readJson(await rest("push_huawei_devices?on_conflict=user_id", {
-          method: "POST",
-          headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-          body: JSON.stringify([{ user_id: OWNER_ID, token, updated_at: new Date().toISOString() }]),
-        }));
-        return json({ ok: true, linked: true });
-      }
-      if (request.method === "DELETE") {
-        await readJson(await rest(`push_huawei_devices?user_id=eq.${OWNER_ID}`, {
-          method: "DELETE", headers: { Prefer: "return=representation" },
-        }));
-        return json({ ok: true, linked: false });
-      }
+      return json({ ok: true, subscribed: rows.length > 0 });
     }
 
     if (action === "subscribe") {
@@ -1088,10 +1016,7 @@ $CRON$)`);
       const subscriptions = await readJson<SubscriptionRow[]>(await rest(
         `push_subscriptions?user_id=eq.${OWNER_ID}&select=endpoint,p256dh,auth`,
       ));
-      const huaweiDevices = await readJson<HuaweiDeviceRow[]>(await rest(
-        `push_huawei_devices?user_id=eq.${OWNER_ID}&select=token`,
-      ));
-      if (subscriptions.length === 0 && huaweiDevices.length === 0) return json({ ok: false, error: "请先开启离线推送。" }, 400);
+      if (subscriptions.length === 0) return json({ ok: false, error: "请先开启离线推送。" }, 400);
       await new Promise(resolve => setTimeout(resolve, 6000));
       const requestedOrigin = cleanText(request.headers.get("x-ai-phone-origin"), 300);
       const subject = requestedOrigin.startsWith("https://") ? requestedOrigin : "mailto:push@ai-phone.local";
@@ -1122,16 +1047,8 @@ $CRON$)`);
           errors.push(error instanceof Error ? error.message : String(error));
         }
       }
-      for (const device of huaweiDevices) {
-        try {
-          await sendHuaweiNotification(device.token, "Float", "华为后台推送测试已送达。");
-          sent += 1;
-        } catch (error) {
-          errors.push(error instanceof Error ? error.message : String(error));
-        }
-      }
       if (sent === 0) return json({ ok: false, error: errors[0] || "测试推送发送失败。" }, 500);
-      return json({ ok: true, sent, total: subscriptions.length + huaweiDevices.length });
+      return json({ ok: true, sent, total: subscriptions.length });
     }
 
     return json({ ok: false, error: "不支持的离线推送操作。" }, 404);

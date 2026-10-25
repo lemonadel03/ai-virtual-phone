@@ -140,7 +140,6 @@ import { useWeixinBridge } from "@/lib/use-weixin-bridge";
 import { startWeixinCloudRealtimeSync } from "@/lib/weixin-cloud-sync";
 import { WeixinSyncToast } from "@/components/weixin-sync-toast";
 import { sendBrowserNotification } from "@/lib/browser-notification";
-import { listenForHuaweiPushToken } from "@/lib/huawei-push-client";
 import type { ChatSharePayload } from "@/lib/chat-share";
 import { completePendingMcpOAuthCallback } from "@/lib/tool-executor";
 import { LayoutGrid, LoaderCircle, RefreshCw } from "lucide-react";
@@ -1114,40 +1113,6 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [draftTheme, setDraftTheme] = useState<ThemeProfile>(() => initialThemeProfile ?? readInitialThemeProfile());
   useEffect(() => {
     activeAppRef.current = activeApp;
-  }, [activeApp]);
-  useEffect(() => listenForHuaweiPushToken(), []);
-  // Android's Back gesture has no WebView history entry for React sub-pages.
-  // Give both the native shell and an installed Chrome PWA the same in-app Back action.
-  useEffect(() => {
-    const navigateBack = (): boolean => {
-      if (!activeAppRef.current) return false;
-      const visibleBackButtons = [...document.querySelectorAll<HTMLButtonElement>(".phone-app-pane .page-back-btn")]
-        .filter(button => button.getClientRects().length > 0);
-      const backButton = visibleBackButtons.at(-1);
-      if (backButton) backButton.click();
-      else {
-        activeAppRef.current = null;
-        setActiveApp(null);
-      }
-      return true;
-    };
-    const shellWindow = window as Window & { FloatNativeBack?: () => boolean };
-    shellWindow.FloatNativeBack = navigateBack;
-    const onPopState = () => {
-      if (navigateBack()) {
-        window.history.pushState({ ...window.history.state, floatBackGuard: true }, "", window.location.href);
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => {
-      delete shellWindow.FloatNativeBack;
-      window.removeEventListener("popstate", onPopState);
-    };
-  }, []);
-  useEffect(() => {
-    if (activeApp && !window.history.state?.floatBackGuard) {
-      window.history.pushState({ ...window.history.state, floatBackGuard: true }, "", window.location.href);
-    }
   }, [activeApp]);
   // Listen for theme CSS updates from 小卷
   useEffect(() => {

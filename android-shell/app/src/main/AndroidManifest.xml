@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- 通话按住说话/语音条录音、视频通话摄像头（WebView getUserMedia 需要壳侧转授） -->
@@ -11,9 +14,6 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
-    <queries>
-        <package android:name="com.huawei.hwid" />
-    </queries>
 
     <application
         android:label="@string/app_name"
@@ -22,8 +22,6 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.FloatShell">
-
-        <meta-data android:name="com.huawei.hms.client.appid" android:value="appid=119509559" />
 
         <activity
             android:name=".MainActivity"
@@ -50,10 +48,17 @@
             android:name=".CallActionReceiver"
             android:exported="false" />
 
-        <service android:name=".HuaweiPushService" android:exported="false">
+        <service
+            android:name=".PushService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
             <intent-filter>
-                <action android:name="com.huawei.push.action.MESSAGING_EVENT" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
-        </service>
+        </receiver>
     </application>
 </manifest>

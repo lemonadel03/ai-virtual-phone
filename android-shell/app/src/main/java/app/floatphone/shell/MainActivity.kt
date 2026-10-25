@@ -21,26 +21,21 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import org.json.JSONObject
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import com.huawei.hms.aaid.HmsInstanceId
-import com.huawei.hms.push.HmsMessaging
 
 /**
  * Float 小手机安卓壳：全屏 WebView 直接加载线上站点。
- * 网页每次部署即时生效，本壳只负责原生能力（华为推送、文件上下行、外链）。
+ * 网页每次部署即时生效，本壳只负责原生能力（推送长连接、文件上下行、外链）。
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         val SITE_URL: String = BuildConfig.SITE_URL
-        const val VERSION = "2.0.0"
+        const val VERSION = "1.0.0"
         /** 来电接听等场景的站内深链（必须以 SITE_URL 开头，否则忽略） */
         const val EXTRA_OPEN_URL = "open_url"
     }
@@ -59,7 +54,9 @@ class MainActivity : AppCompatActivity() {
 
     private val notifPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { }
+    ) { granted ->
+        if (granted) PushService.start(this)
+    }
 
     // 网页侧 getUserMedia（通话按住说话、语音条录音、视频通话摄像头）触发的
     // WebView 权限请求：先要系统运行时权限，拿到后再转授给页面。
@@ -88,11 +85,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        WindowCompat.setDecorFitsSystemWindows(window, true)
         // 音量键默认调媒体流：WebView 里的语音条/TTS 都走媒体流播放，
         // 不设的话短音频没在播时按键调的是铃声，用户感觉"音量键无效、声音巨大"
         volumeControlStream = AudioManager.STREAM_MUSIC
@@ -114,17 +107,12 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(ShellBridge(), "AndroidShell")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView, url: String) {
-                super.onPageFinished(view, url)
-                dispatchHuaweiTokenChanged()
-            }
-
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 val scheme = url.scheme ?: return false
                 // 站内导航留在壳里；http(s) 外链和自定义协议（shortcuts:// 等）交给系统
                 if (scheme == "http" || scheme == "https") {
-                    if (scheme == "https" && url.host == Uri.parse(SITE_URL).host) return false
+                    if (url.host == Uri.parse(SITE_URL).host) return false
                     return runCatching {
                         startActivity(Intent(Intent.ACTION_VIEW, url)); true
                     }.getOrDefault(true)
@@ -187,18 +175,13 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                webView.evaluateJavascript("Boolean(window.FloatNativeBack && window.FloatNativeBack())") { handled ->
-                    if (handled != "true") {
-                        moveTaskToBack(true)
-                    }
-                }
+                if (webView.canGoBack()) webView.goBack() else moveTaskToBack(true)
             }
         })
 
         // 冷启动带深链（如来电接听）直接加载目标；否则加载首页
         webView.loadUrl(consumeOpenUrl(intent) ?: SITE_URL)
-        ensureNotificationPermission()
-        requestHuaweiToken()
+        ensurePushService()
     }
 
     /** singleTask：App 已在运行时（如全屏来电页接听）通过 onNewIntent 送达深链 */
@@ -216,40 +199,15 @@ class MainActivity : AppCompatActivity() {
         return target.takeIf { it.startsWith(SITE_URL) }
     }
 
-    private fun ensureNotificationPermission() {
+    private fun ensurePushService() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
             notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            PushService.start(this)
         }
-    }
-
-    private fun requestHuaweiToken() {
-        Thread {
-            try {
-                val token = HmsInstanceId.getInstance(applicationContext)
-                    .getToken("119509559", HmsMessaging.DEFAULT_TOKEN_SCOPE)
-                if (!token.isNullOrBlank()) {
-                    getSharedPreferences("push", MODE_PRIVATE).edit().putString("token", token).apply()
-                    runOnUiThread { dispatchHuaweiTokenChanged() }
-                }
-            } catch (_: Exception) {
-                // The web settings can retry after HMS Core becomes available.
-            }
-        }.start()
-    }
-
-    private fun dispatchHuaweiTokenChanged() {
-        if (!::webView.isInitialized) return
-        val page = Uri.parse(webView.url ?: "")
-        if (page.scheme != "https" || page.host != Uri.parse(SITE_URL).host) return
-        val token = getSharedPreferences("push", MODE_PRIVATE).getString("token", "").orEmpty()
-        if (token.isBlank()) return
-        webView.evaluateJavascript(
-            "window.dispatchEvent(new CustomEvent('float:huawei-token',{detail:${JSONObject.quote(token)}}))",
-            null,
-        )
     }
 
     override fun onDestroy() {
@@ -262,11 +220,6 @@ class MainActivity : AppCompatActivity() {
     inner class ShellBridge {
         @JavascriptInterface
         fun getVersion(): String = VERSION
-
-        @JavascriptInterface
-        fun requestHuaweiPushToken() {
-            runOnUiThread { dispatchHuaweiTokenChanged() }
-        }
 
         /** 打开本应用的系统设置页（引导用户关电池限制、开自启动）。 */
         @JavascriptInterface
