@@ -26,7 +26,7 @@ import { triggerImmediatePost } from "@/lib/moments-engine";
 import type { Character } from "@/lib/character-types";
 import { requestNotificationPermission } from "@/lib/browser-notification";
 import { disableOfflinePush, enableOfflinePush, getOfflinePushState, isShellEnvironment, loadPushQuietHours, savePushQuietHours, sendTestOfflinePush, type OfflinePushState } from "@/lib/push-client";
-import { isPersonalPushCloudActive, setPersonalPushCloudScheduled } from "@/lib/personal-push-cloud";
+import { isPersonalPushCloudActive, personalPushFetch, setPersonalPushCloudScheduled } from "@/lib/personal-push-cloud";
 import { loadPushCloudScheduled, savePushCloudScheduled } from "@/lib/cloud-deploy-status";
 import { armIdleReconnectBailout, armTimedWakeBailout, cancelBailoutKey, cancelBailoutPrefix } from "@/lib/push-bailout-client";
 import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "@/lib/timed-wake-storage";
@@ -1176,6 +1176,7 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
     const [offlinePushBusy, setOfflinePushBusy] = useState(false);
     const [offlinePushHint, setOfflinePushHint] = useState<string | null>(null);
     const [personalCloudActive, setPersonalCloudActive] = useState(false);
+    const [huaweiLinked, setHuaweiLinked] = useState(false);
     const [pushCloudScheduled, setPushCloudScheduled] = useState(() => loadPushCloudScheduled());
     const [pushScheduleBusy, setPushScheduleBusy] = useState(false);
     const [pushScheduleHint, setPushScheduleHint] = useState("");
@@ -1217,9 +1218,20 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
 
     useEffect(() => {
         setIsShellApp(isShellEnvironment());
-        setPersonalCloudActive(isPersonalPushCloudActive());
+        const personal = isPersonalPushCloudActive();
+        setPersonalCloudActive(personal);
+        const refreshHuawei = () => {
+            if (!personal) return;
+            void personalPushFetch("huawei-device").then(async response => {
+                const data = await response.json().catch(() => ({})) as { ok?: boolean; linked?: boolean };
+                if (data.ok) setHuaweiLinked(data.linked === true);
+            }).catch(() => undefined);
+        };
+        refreshHuawei();
+        window.addEventListener("float:huawei-linked", refreshHuawei);
         void getOfflinePushState().then(setOfflinePushState);
         refreshTimedSchedules();
+        return () => window.removeEventListener("float:huawei-linked", refreshHuawei);
     }, []);
 
     const handleOfflinePushToggle = async (enabled: boolean) => {
@@ -1410,11 +1422,11 @@ function OfflinePushSettingsPage({ onBack }: { onBack: () => void }) {
                                     <span className="menu-desc">关掉后台后仍由系统推送通知（本设备）</span>
                                 </div>
                                 <div className="menu-right flex items-center gap-2">
-                                    {(offlinePushState === "on" || isShellApp) && (
+                                    {(offlinePushState === "on" || huaweiLinked) && (
                                         <button className="ui-btn ui-btn-outline py-1 px-2 ts-11" style={{ whiteSpace: "nowrap" }} onClick={() => void handleOfflinePushTest()} disabled={offlinePushBusy}>测试</button>
                                     )}
                                     <Toggle
-                                        checked={offlinePushState === "on" || isShellApp}
+                                        checked={isShellApp ? huaweiLinked : offlinePushState === "on"}
                                         disabled={offlinePushBusy || isShellApp || offlinePushState === "unsupported"}
                                         onChange={enabled => void handleOfflinePushToggle(enabled)}
                                     />

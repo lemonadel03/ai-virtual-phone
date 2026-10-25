@@ -1,4 +1,4 @@
-name: Build Android Shell APK
+name: Build Float Android APK
 
 on:
   workflow_dispatch:
@@ -7,15 +7,11 @@ on:
         description: "要加载的自部署站点地址（https://…）"
         required: false
         type: string
-  push:
-    branches: [main]
-    paths: ["android-shell/**", ".github/workflows/android-shell.yml"]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 可选签名：仓库 Secrets 配置了 SHELL_KEYSTORE_BASE64 等四项时产出已签名 release
     env:
+      HUAWEI_AGCONNECT_CONFIG_BASE64: ${{ secrets.HUAWEI_AGCONNECT_CONFIG_BASE64 }}
       SHELL_KEYSTORE_BASE64: ${{ secrets.SHELL_KEYSTORE_BASE64 }}
       SHELL_KEYSTORE_PASSWORD: ${{ secrets.SHELL_KEYSTORE_PASSWORD }}
       SHELL_KEY_ALIAS: ${{ secrets.SHELL_KEY_ALIAS }}
@@ -33,23 +29,22 @@ jobs:
         with:
           gradle-version: "8.7"
 
-      - name: Decode keystore (optional)
-        if: ${{ env.SHELL_KEYSTORE_BASE64 != '' }}
+      - name: Restore private Android build inputs
         run: |
+          test -n "$HUAWEI_AGCONNECT_CONFIG_BASE64" || { echo 'Missing HUAWEI_AGCONNECT_CONFIG_BASE64'; exit 1; }
+          test -n "$SHELL_KEYSTORE_BASE64" || { echo 'Missing SHELL_KEYSTORE_BASE64'; exit 1; }
+          test -n "$SHELL_KEYSTORE_PASSWORD" || { echo 'Missing SHELL_KEYSTORE_PASSWORD'; exit 1; }
+          test -n "$SHELL_KEY_ALIAS" || { echo 'Missing SHELL_KEY_ALIAS'; exit 1; }
+          test -n "$SHELL_KEY_PASSWORD" || { echo 'Missing SHELL_KEY_PASSWORD'; exit 1; }
+          echo "$HUAWEI_AGCONNECT_CONFIG_BASE64" | base64 -d > android-shell/app/agconnect-services.json
           echo "$SHELL_KEYSTORE_BASE64" | base64 -d > /tmp/shell.keystore
           echo "SHELL_KEYSTORE_FILE=/tmp/shell.keystore" >> "$GITHUB_ENV"
 
-      - name: Build APKs
-        run: gradle -p android-shell assembleDebug assembleRelease
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: float-shell-debug
-          path: android-shell/app/build/outputs/apk/debug/app-debug.apk
+      - name: Build signed APK
+        run: gradle -p android-shell assembleRelease
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: float-shell-release
+          name: float-huawei-release
           path: android-shell/app/build/outputs/apk/release/*.apk

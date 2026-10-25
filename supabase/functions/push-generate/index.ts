@@ -124,6 +124,46 @@ async function sendWebPushRaw(
   return response.status;
 }
 
+let huaweiAccessToken = "";
+let huaweiAccessTokenUntil = 0;
+
+async function sendHuaweiNotification(deviceToken: string, title: string, body: string): Promise<void> {
+  const clientSecret = Deno.env.get("HUAWEI_PUSH_CLIENT_SECRET") || "";
+  if (!clientSecret) throw new Error("HUAWEI_PUSH_CLIENT_SECRET is not configured");
+  if (!huaweiAccessToken || Date.now() >= huaweiAccessTokenUntil) {
+    const response = await fetch("https://oauth-login.cloud.huawei.com/oauth2/v3/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: "119509559", client_secret: clientSecret }),
+    });
+    const result = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
+    if (!response.ok || !result.access_token) throw new Error(`Huawei OAuth HTTP ${response.status}`);
+    huaweiAccessToken = result.access_token;
+    huaweiAccessTokenUntil = Date.now() + Math.max(60, (Number(result.expires_in) || 3600) - 120) * 1000;
+  }
+  const response = await fetch("https://push-api.cloud.huawei.com/v1/119509559/messages:send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${huaweiAccessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      validate_only: false,
+      message: {
+        android: {
+          ttl: "3600s",
+          notification: {
+            title: title.slice(0, 100), body: body.slice(0, 1000),
+            click_action: { type: 3 },
+          },
+        },
+        token: [deviceToken],
+      },
+    }),
+  });
+  const result = await response.json().catch(() => ({})) as { code?: string; msg?: string };
+  if (!response.ok || result.code !== "80000000") {
+    throw new Error(`Huawei Push ${result.code || response.status}: ${(result.msg || "send failed").slice(0, 120)}`);
+  }
+}
+
 // ── 内嵌：lib/llm-provider-adapter 的响应文本提取 ──
 function stripHallucinatedTimestamps(text: string): string {
   return text
@@ -578,7 +618,9 @@ Deno.serve(async (req: Request) => {
 
     const subsResponse = await rest(`push_subscriptions?user_id=eq.${encodeURIComponent(job.user_id)}&select=endpoint,p256dh,auth`);
     const subs = subsResponse.ok ? await subsResponse.json() as SubscriptionRow[] : [];
-    if (subs.length === 0 && payload.weixin?.force !== true) {
+    const huaweiResponse = await rest(`push_huawei_devices?user_id=eq.${encodeURIComponent(job.user_id)}&select=token`);
+    const huaweiDevices = huaweiResponse.ok ? await huaweiResponse.json() as { token: string }[] : [];
+    if (subs.length === 0 && huaweiDevices.length === 0 && payload.weixin?.force !== true) {
       await finish("done", "no_subscription");
       return;
     }
@@ -1120,6 +1162,16 @@ Deno.serve(async (req: Request) => {
           } catch (err) {
             pushErrors.push((err instanceof Error ? err.message : String(err)).slice(0, 80));
           }
+        }
+      }
+      for (const device of huaweiDevices) {
+        try {
+          const link = new URL(targetUrl, siteOrigin || "https://float-lemonadel03.netlify.app/");
+          if (link.protocol !== "https:") throw new Error("invalid notification URL");
+          await sendHuaweiNotification(device.token, title, partBody);
+          pushed += 1;
+        } catch (err) {
+          pushErrors.push(`huawei ${(err instanceof Error ? err.message : String(err)).slice(0, 80)}`);
         }
       }
       if (hasShellSub) {

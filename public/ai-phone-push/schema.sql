@@ -16,7 +16,7 @@ begin
       and c.relkind in ('r', 'p')
       and c.relname <> all (array[
         'ai_phone_cloud_meta',
-        'push_server_config', 'push_subscriptions', 'push_jobs', 'push_outbox',
+        'push_server_config', 'push_subscriptions', 'push_huawei_devices', 'push_jobs', 'push_outbox',
         'push_shortcut_commands', 'push_bridge_config', 'push_bridge_snapshots',
         'push_screen_sessions', 'push_screen_threads'
       ])
@@ -61,6 +61,12 @@ create table if not exists public.push_subscriptions (
   last_ok_at timestamptz
 );
 create index if not exists push_subscriptions_user_idx on public.push_subscriptions (user_id);
+
+create table if not exists public.push_huawei_devices (
+  user_id text primary key,
+  token text not null,
+  updated_at timestamptz not null default now()
+);
 
 create table if not exists public.push_jobs (
   id text primary key,
@@ -293,6 +299,7 @@ $function$;
 alter table public.push_server_config enable row level security;
 alter table public.ai_phone_cloud_meta enable row level security;
 alter table public.push_subscriptions enable row level security;
+alter table public.push_huawei_devices enable row level security;
 alter table public.push_jobs enable row level security;
 alter table public.push_outbox enable row level security;
 alter table public.push_shortcut_commands enable row level security;
@@ -302,6 +309,7 @@ alter table public.push_screen_threads enable row level security;
 
 -- 屏幕速聊表和 RPC 只由 Edge Function 的 service_role 使用；客户端角色没有表级权限。
 revoke all on table public.push_screen_threads from public, anon, authenticated;
+revoke all on table public.push_huawei_devices from public, anon, authenticated;
 
 -- 2026 年起新项目不会自动把 public 新表暴露给 Data API。
 -- 网关和生成器只以 service_role 访问，绝不授予 anon 或 authenticated。
@@ -310,6 +318,7 @@ grant select, insert, update, delete on table
   public.push_server_config,
   public.ai_phone_cloud_meta,
   public.push_subscriptions,
+  public.push_huawei_devices,
   public.push_jobs,
   public.push_outbox,
   public.push_shortcut_commands,

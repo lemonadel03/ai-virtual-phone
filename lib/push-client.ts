@@ -98,7 +98,7 @@ export async function hasAccountPushSubscription(): Promise<boolean> {
     }
 }
 
-/** 是否运行在安卓壳（FloatShell App）的 WebView 里。壳自带长连接推送通道，不走 Web Push。 */
+/** 是否运行在安卓壳（FloatShell App）的 WebView 里。壳使用华为 Push Kit，不走 Web Push。 */
 export function isShellEnvironment(): boolean {
     return typeof navigator !== "undefined" && navigator.userAgent.includes("FloatShell/");
 }
@@ -229,7 +229,7 @@ export async function getOfflinePushState(): Promise<OfflinePushState> {
 
 export async function enableOfflinePush(): Promise<{ ok: boolean; error?: string }> {
     if (isShellEnvironment()) {
-        return { ok: false, error: "App 版自带推送通道，无需在此开启；保持系统通知权限开启即可收到离线消息。" };
+        return { ok: false, error: "App 版使用华为 Push Kit。请先连接个人云并允许系统通知。" };
     }
     if (!isPushSupported()) {
         return { ok: false, error: "当前环境不支持系统推送。iOS 请先「添加到主屏幕」，再从主屏幕图标打开开启。" };
