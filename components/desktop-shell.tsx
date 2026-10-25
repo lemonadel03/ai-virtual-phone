@@ -1121,7 +1121,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   useEffect(() => {
     const navigateBack = (): boolean => {
       if (!activeAppRef.current) return false;
-      const visibleBackButtons = [...document.querySelectorAll<HTMLButtonElement>(".phone-app-pane .page-back-btn[aria-label='返回']")]
+      const visibleBackButtons = [...document.querySelectorAll<HTMLButtonElement>(".phone-app-pane .page-back-btn")]
         .filter(button => button.getClientRects().length > 0);
       const backButton = visibleBackButtons.at(-1);
       if (backButton) backButton.click();
