@@ -292,12 +292,6 @@
 }
 
 /* Swipe layer wraps the icon grid to allow drag-to-switch pages */
-@property --swipe-drag {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
-}
-
 .phone-swipe-layer {
   flex: 1 1 auto;
   min-height: 0;
@@ -314,10 +308,6 @@
 /* While dragging we want 1:1 finger tracking, so suppress the settle transition. */
 .phone-swipe-layer.phone-swipe-dragging {
   transition: none;
-}
-
-html[data-float-shell="1"] .phone-swipe-layer:not(.phone-swipe-dragging) {
-  transition-duration: 220ms;
 }
 
 /* ── Icon grid ── */

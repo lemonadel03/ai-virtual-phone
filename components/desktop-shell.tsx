@@ -1045,7 +1045,6 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     musicOverlayControllerRef.current = controller;
   }, []);
   useAndroidCaretKeyboardLift();
-  const isAndroidShell = typeof navigator !== "undefined" && navigator.userAgent.includes("FloatShell/");
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [layout, setLayout] = useState<DesktopLayout>(DEFAULT_LAYOUT);
   // Dock is an ordered icon-id list (max DOCK_MAX), kept disjoint from `layout`.
@@ -1159,13 +1158,10 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
     startX: number;
     startY: number;
     deltaX: number;
-    pageWidth: number;
     locked: "x" | "y" | null;
     pointerId: number | null;
-  }>({ startX: 0, startY: 0, deltaX: 0, pageWidth: 390, locked: null, pointerId: null });
+  }>({ startX: 0, startY: 0, deltaX: 0, locked: null, pointerId: null });
   const swipeLayerRef = useRef<HTMLDivElement | null>(null);
-  const swipeDragFrameRef = useRef(0);
-  const pendingSwipeDragRef = useRef(0);
 
   // ── Edit mode (long-press drag) ──
   const [editMode, setEditMode] = useState(false);
@@ -3673,26 +3669,14 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     };
   }, [activeApp, currentPage, currentPageIndex, currentIcons.length, currentPageWidgets.length]);
 
-  // Read layout once at pointer down. Coalesce move events into one compositor
-  // update per frame instead of forcing layout/style work for every event.
+  const getSwipePageWidth = useCallback(() => {
+    return swipeLayerRef.current?.getBoundingClientRect().width || shellRef.current?.getBoundingClientRect().width || 390;
+  }, []);
+
+  // Live finger offset while dragging — a transient CSS var so moving doesn't
+  // re-render. Releasing sets it back to 0 and the CSS transition settles the page.
   const setSwipeDrag = useCallback((px: number) => {
-    pendingSwipeDragRef.current = px;
-    if (swipeDragFrameRef.current) return;
-    swipeDragFrameRef.current = window.requestAnimationFrame(() => {
-      swipeDragFrameRef.current = 0;
-      swipeLayerRef.current?.style.setProperty("--swipe-drag", `${pendingSwipeDragRef.current}px`);
-    });
-  }, []);
-
-  const resetSwipeDrag = useCallback(() => {
-    if (swipeDragFrameRef.current) window.cancelAnimationFrame(swipeDragFrameRef.current);
-    swipeDragFrameRef.current = 0;
-    pendingSwipeDragRef.current = 0;
-    swipeLayerRef.current?.style.setProperty("--swipe-drag", "0px");
-  }, []);
-
-  useEffect(() => () => {
-    if (swipeDragFrameRef.current) window.cancelAnimationFrame(swipeDragFrameRef.current);
+    swipeLayerRef.current?.style.setProperty("--swipe-drag", `${px}px`);
   }, []);
 
   const handleSwipeStart = useCallback((e: React.PointerEvent) => {
@@ -3707,7 +3691,6 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     s.startX = e.clientX;
     s.startY = e.clientY;
     s.deltaX = 0;
-    s.pageWidth = swipeLayerRef.current?.clientWidth || shellRef.current?.clientWidth || 390;
     s.locked = null;
     s.pointerId = e.pointerId;
     // Suppress the settle transition for 1:1 finger tracking while dragging.
@@ -3813,7 +3796,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     // Compute the pixel position from the committed page + finger delta, with
     // rubber-banding past the first/last page, then express it as an offset from
     // the current page's base (= the --swipe-drag CSS var).
-    const pageWidth = s.pageWidth;
+    const pageWidth = getSwipePageWidth();
     const page = currentPageIndexRef.current;
     let translateX = -page * pageWidth + dx;
     const minTranslateX = -Math.max(0, pageCount - 1) * pageWidth;
@@ -3822,7 +3805,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     s.deltaX = dx;
     setSwipeDrag(translateX + page * pageWidth);
-  }, [editMode, pageCount, setSwipeDrag]);
+  }, [editMode, getSwipePageWidth, pageCount, setSwipeDrag]);
 
   const handleSwipeEnd = useCallback((e: React.PointerEvent) => {
     // Clear long-press
@@ -3858,7 +3841,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     const dx = s.deltaX;
     s.deltaX = 0;
-    const pageWidth = s.pageWidth;
+    const pageWidth = getSwipePageWidth();
     const swipeThreshold = Math.max(SWIPE_MIN_THRESHOLD, pageWidth * SWIPE_THRESHOLD_RATIO);
 
     const page = currentPageIndexRef.current;
@@ -3870,9 +3853,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     // Re-enable the transition, clear the finger offset, and commit the page.
     // currentPageIndex is the single source of truth → CSS settles to it, no race.
     swipeLayerRef.current?.classList.remove("phone-swipe-dragging");
-    resetSwipeDrag();
+    setSwipeDrag(0);
     if (targetPageIndex !== page) setCurrentPageIndex(targetPageIndex);
-  }, [editMode, pageCount, resetSwipeDrag]);
+  }, [editMode, getSwipePageWidth, pageCount, setSwipeDrag]);
 
   const handleCloseXiaohongshu = useCallback((isBusy?: boolean) => {
     const shouldKeepMounted = isBusy ?? xiaohongshuBusy;
@@ -4478,7 +4461,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                       : "phone-workspace"
                 }
                 style={{
-                  touchAction: activeApp ? undefined : editMode || isAndroidShell ? "none" : "pan-y",
+                  touchAction: activeApp ? undefined : editMode ? "none" : "pan-y",
                   ...(!desktopReady && !activeApp ? { visibility: "hidden" } : {}),
                 }}
                 onPointerDown={handleSwipeStart}
