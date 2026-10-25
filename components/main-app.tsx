@@ -236,6 +236,10 @@ export function MainApp() {
   useEffect(() => {
     let cancelled = false;
 
+    if (window.navigator.userAgent.includes("FloatShell/")) {
+      document.documentElement.dataset.floatShell = "1";
+    }
+
     // 申请持久化存储：批准后 iOS/安卓不会再因存储压力擅自回收 IndexedDB
     // （摊主钥匙、聊天记录等都存在里面）。静默尽力而为，被拒也无碍。
     void navigator.storage?.persist?.().catch(() => {});

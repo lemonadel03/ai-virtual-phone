@@ -413,9 +413,10 @@ function FreestyleFrame68Widget({ config, widgetId, onConfigChange, preview }: a
     <div className="wg-frame68">
       <div className="wg-f68-wrapper">
         <img 
-          src="/widgets/68老橙子素材.png" 
+          src="/widgets/frame-68-mobile.png"
           className="wg-f68-overlay-img" 
-          alt="Frame 68"
+          alt="天气主题装饰"
+          decoding="async"
         />
       </div>
     </div>
